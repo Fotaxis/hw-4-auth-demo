@@ -26,11 +26,13 @@ public class TokenService {
         this.jwtTokenProvider = jwtTokenProvider;
     }
 
-    public RefreshToken createRefreshToken(User user) {
+    public RefreshToken createRefreshToken(User user, String ipAddress) {
+        refreshTokenRepository.deleteByUser(user);
         RefreshToken refreshToken = new RefreshToken();
         refreshToken.setUser(user);
         refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenExpiteTime));
         refreshToken.setToken(UUID.randomUUID().toString());
+        refreshToken.setIpAddress(ipAddress);
         refreshToken = refreshTokenRepository.save(refreshToken);
         return refreshToken;
     }

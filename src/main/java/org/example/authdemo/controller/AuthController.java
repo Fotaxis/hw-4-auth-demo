@@ -1,5 +1,6 @@
 package org.example.authdemo.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.example.authdemo.dto.LoginRequest;
 import org.example.authdemo.dto.RefreshTokenRequest;
@@ -30,25 +31,28 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<Object> register(@Valid @RequestBody RegisterRequest req) {
-        User user = userService.register(req);
+        userService.register(req);
         return ResponseEntity.ok("User registered");
 
     }
 
     @PostMapping("/login")
-    public ResponseEntity<Object> login(@Valid @RequestBody LoginRequest req) {
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest req, HttpServletRequest request) {
         User user = userService.findByLogin(req.getLogin());
         if (!userService.checkPassword(req.getPassword(), user.getPassword())) {
             throw new CustomException("Invalid credentials", HttpStatus.UNAUTHORIZED);
         }
+        String ip = extractIp(request);
+
         String accessToken = tokenService.generateAccessToken(user);
-        RefreshToken refreshToken = tokenService.createRefreshToken(user);
+        RefreshToken refreshToken = tokenService.createRefreshToken(user, ip);
 
         return ResponseEntity.ok(new TokenResponse(accessToken, refreshToken.getToken()));
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<Object> refreshToken(@Valid @RequestBody RefreshTokenRequest request) {
+    public ResponseEntity<?> refreshToken(@Valid @RequestBody RefreshTokenRequest request,
+                                               HttpServletRequest httpRequest) {
         String requestToken = request.getRefreshToken();
 
         RefreshToken refreshToken = tokenService.findByToken(requestToken)
@@ -56,14 +60,21 @@ public class AuthController {
 
         tokenService.verifyExpiration(refreshToken);
 
+        String currentIp = extractIp(httpRequest);
+        if (!refreshToken.getIpAddress().equals(currentIp)) {
+            throw new CustomException("Refresh token used from new IP - Please login again", HttpStatus.UNAUTHORIZED);
+        }
+
         User user = refreshToken.getUser();
+
+        RefreshToken newRefreshToken = tokenService.createRefreshToken(user, currentIp);
         String newAccessToken = tokenService.generateAccessToken(user);
 
-        return ResponseEntity.ok(new TokenResponse(newAccessToken, requestToken));
+        return ResponseEntity.ok(new TokenResponse(newAccessToken, newRefreshToken.getToken()));
     }
 
     @PostMapping("/revoke")
-    public ResponseEntity<Object> revokeToken(@Valid @RequestBody RefreshTokenRequest request) {
+    public ResponseEntity<?> revokeToken(@Valid @RequestBody RefreshTokenRequest request) {
         String requestToken = request.getRefreshToken();
 
         RefreshToken refreshToken = tokenService.findByToken(requestToken)
@@ -73,5 +84,11 @@ public class AuthController {
 
         return ResponseEntity.ok("Refresh token revoked");
     }
+
+    private String extractIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        return (ip == null || ip.isEmpty()) ? request.getRemoteAddr() : ip;
+    }
+
 }
 
